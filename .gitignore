@@ -1,0 +1,19 @@
+# Build outputs
+build/
+dist/
+out/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# IDE
+.idea/
+.vscode/
+
+# Local config
+*.local
+*.log
+secrets.*
