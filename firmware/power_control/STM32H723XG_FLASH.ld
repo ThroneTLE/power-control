@@ -60,6 +60,7 @@ RAM_D1 (xrw)      : ORIGIN = 0x24000000, LENGTH = 320K
 RAM_D2 (xrw)      : ORIGIN = 0x30000000, LENGTH = 32K
 RAM_D3 (xrw)      : ORIGIN = 0x38000000, LENGTH = 16K
 ITCMRAM (xrw)      : ORIGIN = 0x00000000, LENGTH = 64K
+SDRAM (xrw)      : ORIGIN = 0xC00C0000, LENGTH = 32000K
 FLASH (rx)      : ORIGIN = 0x8000000, LENGTH = 1024K
 }
 
@@ -229,6 +230,14 @@ SECTIONS
 
   PROVIDE( __bss_start = __tbss_start );
   PROVIDE( __bss_size = __bss_end - __bss_start );
+
+  .sdram (NOLOAD) : ALIGN(32)
+  {
+    . = ALIGN(32);
+    *(.sdram)
+    *(.sdram*)
+    . = ALIGN(32);
+  } >SDRAM
 
   /* User_heap_stack section, used to check that there is enough RAM left */
   ._user_heap_stack (NOLOAD) :
