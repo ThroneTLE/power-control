@@ -15,6 +15,8 @@ void start_lcd_task(void *argument)
 void lcd_task_entry(void *argument)
 {
   lv_display_t *display = NULL;
+  bool touch_initialized = false;
+  uint32_t elapsed_ms = 0U;
 
   (void)argument;
 
@@ -43,13 +45,20 @@ void lcd_task_entry(void *argument)
   lv_obj_center(button_label);
   lv_obj_add_event_cb(button, touch_test_button_event_cb, LV_EVENT_CLICKED, button_label);
 
-  (void)touch_lvgl_init(display);
   lcd_display_backlight_on();
 
   for (;;)
   {
     lv_tick_inc(5);
     lv_timer_handler();
+
+    if (!touch_initialized && elapsed_ms >= 500U)
+    {
+      (void)touch_lvgl_init(display);
+      touch_initialized = true;
+    }
+
+    elapsed_ms += 5U;
     osDelay(5);
   }
 }
