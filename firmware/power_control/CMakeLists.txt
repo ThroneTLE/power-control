@@ -47,6 +47,7 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user sources here
     tasks/lcd/lcd_task.c
+    app/drivers/ad5593r/ad5593r.c
     app/drivers/lcd/lcd_display.c
     app/drivers/sdram/sdram.c
     app/drivers/touch/goodix_touch.c
@@ -58,6 +59,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user defined include paths
     tasks/lcd
+    app/drivers/ad5593r
     app/drivers/lcd
     app/drivers/sdram
     app/drivers/touch
