@@ -20,6 +20,11 @@
 #define CONTROL_DAC_MAX_VOLTS    5.0f
 #define CONTROL_ADC_MAX_KV       5.0f
 
+#define CONTROL_PID_KP 0.8f
+#define CONTROL_PID_KI 0.4f
+#define CONTROL_PID_KD 0.0f
+#define CONTROL_PID_INTEGRAL_LIMIT (CONTROL_DAC_MAX_VOLTS / CONTROL_PID_KI)
+
 static bool control_task_init_ad5593r(ad5593r_handle_t *ad5593r);
 static bool control_task_init_pid(pid_controller_t *pid);
 static bool control_task_read_feedback(ad5593r_handle_t *ad5593r, float *feedback_kv);
@@ -121,13 +126,13 @@ static bool control_task_init_ad5593r(ad5593r_handle_t *ad5593r)
 static bool control_task_init_pid(pid_controller_t *pid)
 {
   const pid_controller_config_t config = {
-      .kp = 0.8f,
-      .ki = 0.4f,
-      .kd = 0.0f,
+      .kp = CONTROL_PID_KP,
+      .ki = CONTROL_PID_KI,
+      .kd = CONTROL_PID_KD,
       .output_min = CONTROL_DAC_MIN_VOLTS,
       .output_max = CONTROL_DAC_MAX_VOLTS,
-      .integral_min = -5.0f,
-      .integral_max = 5.0f,
+      .integral_min = -CONTROL_PID_INTEGRAL_LIMIT,
+      .integral_max = CONTROL_PID_INTEGRAL_LIMIT,
       .setpoint_rate_limit = 1.0f,
       .output_rate_limit = 2.0f,
       .derivative_filter_tau = 0.0f,
