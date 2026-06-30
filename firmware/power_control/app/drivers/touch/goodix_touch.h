@@ -24,8 +24,12 @@ typedef struct
   uint16_t raw_y;
   uint16_t x;
   uint16_t y;
+  uint32_t scan_count;
   uint32_t read_count;
+  uint16_t config_checksum;
+  uint8_t config_version;
   uint8_t error;
+  bool config_applied;
 } goodix_touch_diagnostics_t;
 
 bool goodix_touch_init(void);

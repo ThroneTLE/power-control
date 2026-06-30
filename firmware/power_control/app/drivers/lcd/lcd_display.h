@@ -18,6 +18,7 @@ void lcd_display_backlight_on(void);
 void lcd_display_backlight_off(void);
 void lcd_display_clear(uint16_t color);
 lv_display_t *lcd_display_lvgl_init(void);
+void lcd_display_ltdc_irq_handler(void);
 
 #ifdef __cplusplus
 }

@@ -26,6 +26,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "touch_task.h"
 
 /* USER CODE END Includes */
 
@@ -46,6 +47,12 @@
 
 /* Private variables ---------------------------------------------------------*/
 /* USER CODE BEGIN Variables */
+static osThreadId_t touch_taskHandle;
+static const osThreadAttr_t touch_task_attributes = {
+  .name = "touch_task",
+  .stack_size = 512 * 4,
+  .priority = (osPriority_t) osPriorityAboveNormal,
+};
 
 /* USER CODE END Variables */
 /* Definitions for defaultTask */
@@ -65,6 +72,7 @@ const osThreadAttr_t lcd_task_attributes = {
 
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN FunctionPrototypes */
+void start_touch_task(void *argument);
 
 /* USER CODE END FunctionPrototypes */
 
@@ -108,6 +116,8 @@ void MX_FREERTOS_Init(void) {
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
+  touch_taskHandle = osThreadNew(start_touch_task, NULL, &touch_task_attributes);
+  (void)touch_taskHandle;
   /* USER CODE END RTOS_THREADS */
 
   /* USER CODE BEGIN RTOS_EVENTS */
@@ -154,6 +164,13 @@ __weak void start_lcd_task(void *argument)
 
 /* Private application code --------------------------------------------------*/
 /* USER CODE BEGIN Application */
+__weak void start_touch_task(void *argument)
+{
+  for(;;)
+  {
+    osDelay(1);
+  }
+}
 
 /* USER CODE END Application */
 

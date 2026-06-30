@@ -4,12 +4,12 @@
 #include "main.h"
 
 #define LCD_FRAMEBUFFER_0_ADDRESS LCD_FRAMEBUFFER_ADDRESS
-#define LCD_RELOAD_TIMEOUT_LOOPS   1000000U
 
 static uint16_t lcd_back_buffer[LCD_DISPLAY_WIDTH * LCD_DISPLAY_HEIGHT] __attribute__((section(".sdram"), aligned(32)));
 
 static void lcd_display_swap_buffers(uint8_t *px_map);
 static void lcd_display_flush(lv_display_t *display, const lv_area_t *area, uint8_t *px_map);
+static lv_display_t *lcd_lvgl_display = NULL;
 
 void lcd_display_reset(void)
 {
@@ -55,6 +55,10 @@ lv_display_t *lcd_display_lvgl_init(void)
                          lcd_back_buffer,
                          LCD_FRAMEBUFFER_SIZE,
                          LV_DISPLAY_RENDER_MODE_DIRECT);
+  lcd_lvgl_display = display;
+
+  HAL_NVIC_SetPriority(LTDC_IRQn, 5, 0);
+  HAL_NVIC_EnableIRQ(LTDC_IRQn);
 
   return display;
 }
@@ -62,24 +66,40 @@ lv_display_t *lcd_display_lvgl_init(void)
 static void lcd_display_swap_buffers(uint8_t *px_map)
 {
   uint32_t next_address = (uint32_t)px_map;
-  uint32_t timeout = LCD_RELOAD_TIMEOUT_LOOPS;
 
   (void)HAL_LTDC_SetAddress_NoReload(&hltdc, next_address, 0U);
   (void)HAL_LTDC_Reload(&hltdc, LTDC_RELOAD_VERTICAL_BLANKING);
-  while ((hltdc.Instance->SRCR & LTDC_SRCR_VBR) != 0U && timeout > 0U)
-  {
-    --timeout;
-  }
 }
 
 static void lcd_display_flush(lv_display_t *display, const lv_area_t *area, uint8_t *px_map)
 {
   (void)area;
 
-  if (lv_display_flush_is_last(display))
+  if (!lv_display_flush_is_last(display))
   {
-    lcd_display_swap_buffers(px_map);
+    lv_display_flush_ready(display);
+    return;
   }
 
-  lv_display_flush_ready(display);
+  if (lcd_lvgl_display == NULL)
+  {
+    lcd_lvgl_display = display;
+  }
+
+  lcd_display_swap_buffers(px_map);
+}
+
+void lcd_display_ltdc_irq_handler(void)
+{
+  HAL_LTDC_IRQHandler(&hltdc);
+}
+
+void HAL_LTDC_ReloadEventCallback(LTDC_HandleTypeDef *hltdc)
+{
+  (void)hltdc;
+
+  if (lcd_lvgl_display != NULL)
+  {
+    lv_display_flush_ready(lcd_lvgl_display);
+  }
 }

@@ -10,6 +10,7 @@
 #define GOODIX_ADDRESS_SECONDARY 0x5DU
 
 #define GOODIX_REG_CONTROL 0x8040U
+#define GOODIX_REG_CONFIG  0x8050U
 #define GOODIX_REG_PID     0x8140U
 #define GOODIX_REG_STATUS  0x814EU
 #define GOODIX_REG_POINT1  0x8150U
@@ -38,6 +39,9 @@ bool goodix_touch_init(void)
 
   goodix_initialized = false;
   goodix_diagnostics.initialized = false;
+  goodix_diagnostics.config_applied = false;
+  goodix_diagnostics.config_version = 0U;
+  goodix_diagnostics.config_checksum = 0U;
   goodix_diagnostics.error = 0U;
   goodix_diagnostics.status = 0U;
   memcpy(goodix_diagnostics.pid, "----", 5U);
@@ -70,6 +74,8 @@ bool goodix_touch_init(void)
     return false;
   }
 
+  (void)goodix_read(GOODIX_REG_CONFIG, &goodix_diagnostics.config_version, 1U);
+
   (void)goodix_write_u8(GOODIX_REG_STATUS, 0x00U);
   goodix_initialized = true;
   goodix_diagnostics.initialized = true;
@@ -90,6 +96,8 @@ bool goodix_touch_read(goodix_touch_point_t *point)
     goodix_diagnostics.error = 3U;
     return false;
   }
+
+  goodix_diagnostics.scan_count++;
 
   if (!goodix_read(GOODIX_REG_STATUS, &status, 1U))
   {

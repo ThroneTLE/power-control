@@ -10,12 +10,10 @@
 
 #include <string.h>
 
-#define LCD_TASK_PERIOD_MS       2U
-#define AD5593R_WAVE_PERIOD_MS   16U
+#define LCD_TASK_PERIOD_MS       1U
+#define AD5593R_WAVE_PERIOD_MS   20U
 #define AD5593R_UI_I2C_TIMEOUT_MS 5U
-#define TOUCH_INIT_DELAY_MS      500U
-#define TOUCH_INIT_RETRY_MS      500U
-#define TOUCH_DEBUG_PERIOD_MS    50U
+#define TOUCH_DEBUG_PERIOD_MS    100U
 #define AD5593R_CHART_POINTS     96U
 #define AD5593R_WAVE_POINTS      64U
 #define AD5593R_TEST_DAC_CHANNEL 0U
@@ -76,9 +74,7 @@ void lcd_task_entry(void *argument)
   lcd_ad5593r_ui_t ui = {0};
   ad5593r_status_t ad5593r_status = AD5593R_STATUS_OK;
   bool ad5593r_ready = false;
-  bool touch_initialized = false;
   uint32_t elapsed_ms = 0U;
-  uint32_t last_touch_init_attempt_ms = 0U;
   uint32_t last_debug_update_ms = 0U;
   uint32_t wave_elapsed_ms = AD5593R_WAVE_PERIOD_MS;
   uint32_t wave_index = 0U;
@@ -99,6 +95,7 @@ void lcd_task_entry(void *argument)
   }
 
   lcd_ad5593r_create_ui(&ui);
+  (void)touch_lvgl_init(display);
   lcd_display_backlight_on();
 
   ad5593r_status = ad5593r_init(&ad5593r, &ad5593r_config);
@@ -118,20 +115,13 @@ void lcd_task_entry(void *argument)
     lv_tick_inc(LCD_TASK_PERIOD_MS);
     lv_timer_handler();
 
-    if (!touch_initialized && elapsed_ms >= TOUCH_INIT_DELAY_MS &&
-        (elapsed_ms - last_touch_init_attempt_ms) >= TOUCH_INIT_RETRY_MS)
-    {
-      touch_initialized = touch_lvgl_init(display);
-      last_touch_init_attempt_ms = elapsed_ms;
-    }
-
     if ((elapsed_ms - last_debug_update_ms) >= TOUCH_DEBUG_PERIOD_MS)
     {
       update_touch_debug_label(ui.touch_debug_label);
       last_debug_update_ms = elapsed_ms;
     }
 
-    if (ad5593r_ready && wave_elapsed_ms >= AD5593R_WAVE_PERIOD_MS)
+    if (ad5593r_ready && wave_elapsed_ms >= AD5593R_WAVE_PERIOD_MS && !touch_lvgl_is_pressed())
     {
       dac_raw = lcd_ad5593r_sine_raw[wave_index];
       ad5593r_status = ad5593r_write_dac(&ad5593r, AD5593R_TEST_DAC_CHANNEL, dac_raw);
@@ -390,17 +380,20 @@ static void update_touch_debug_label(lv_obj_t *label)
   goodix_touch_get_diagnostics(&diag);
   lv_snprintf(text,
               sizeof(text),
-              "TP %s ADDR:%02X PID:%s STA:%02X\n"
-              "XY:%u,%u RAW:%u,%u\n"
-              "CNT:%lu ERR:%u",
-              touch_lvgl_is_initialized() ? "OK" : "FAIL",
+              "TP %s INIT:%u CFG:%u V:%02X A:%02X\n"
+              "XY:%u,%u RAW:%u,%u S:%02X\n"
+              "SCAN:%lu READ:%lu ERR:%u",
+              touch_lvgl_is_initialized() ? "LVGL" : "WAIT",
+              diag.initialized ? 1U : 0U,
+              diag.config_applied ? 1U : 0U,
+              diag.config_version,
               diag.address,
-              diag.pid,
-              diag.status,
               diag.x,
               diag.y,
               diag.raw_x,
               diag.raw_y,
+              diag.status,
+              (unsigned long)diag.scan_count,
               (unsigned long)diag.read_count,
               diag.error);
   lv_label_set_text(label, text);
