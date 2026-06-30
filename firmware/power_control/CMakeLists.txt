@@ -49,6 +49,9 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     tasks/lcd/lcd_task.c
     app/drivers/lcd/lcd_display.c
     app/drivers/sdram/sdram.c
+    app/drivers/touch/goodix_touch.c
+    app/drivers/touch/touch_i2c.c
+    app/drivers/touch/touch_lvgl.c
 )
 
 # Add include paths
@@ -57,6 +60,7 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     tasks/lcd
     app/drivers/lcd
     app/drivers/sdram
+    app/drivers/touch
 )
 
 # Add project symbols (macros)
