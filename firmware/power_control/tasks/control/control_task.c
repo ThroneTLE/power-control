@@ -3,6 +3,7 @@
 #include "ad5593r.h"
 #include "control_context.h"
 #include "cmsis_os2.h"
+#include "feedback_filter.h"
 #include "i2c.h"
 #include "pid_controller.h"
 
@@ -26,6 +27,7 @@
 #define CONTROL_PID_INTEGRAL_LIMIT (CONTROL_DAC_MAX_VOLTS / CONTROL_PID_KI)
 #define CONTROL_SETPOINT_RATE_LIMIT 5.0f
 #define CONTROL_OUTPUT_RATE_LIMIT   5.0f
+#define CONTROL_FEEDBACK_FILTER_ALPHA 0.1f
 
 static bool control_task_init_ad5593r(ad5593r_handle_t *ad5593r);
 static bool control_task_init_pid(pid_controller_t *pid);
@@ -44,7 +46,9 @@ void control_task_entry(void *argument)
 {
   ad5593r_handle_t ad5593r = {0};
   pid_controller_t pid = {0};
+  feedback_filter_t feedback_filter = {0};
   uint32_t fault_flags = CONTROL_FAULT_NONE;
+  float raw_feedback_kv = 0.0f;
   float feedback_kv = 0.0f;
   float dac_volts = 0.0f;
   uint16_t dac_raw = 0U;
@@ -60,6 +64,7 @@ void control_task_entry(void *argument)
   {
     fault_flags |= CONTROL_FAULT_PID;
   }
+  feedback_filter_init(&feedback_filter, CONTROL_FEEDBACK_FILTER_ALPHA, 0.0f);
 
   if (!control_task_init_ad5593r(&ad5593r))
   {
@@ -76,8 +81,9 @@ void control_task_entry(void *argument)
       const float reference_kv =
           control_task_clamp(control_get_reference_kv(), CONTROL_REFERENCE_MIN_KV, CONTROL_REFERENCE_MAX_KV);
 
-      if (control_task_read_feedback(&ad5593r, &feedback_kv))
+      if (control_task_read_feedback(&ad5593r, &raw_feedback_kv))
       {
+        feedback_kv = feedback_filter_update(&feedback_filter, raw_feedback_kv);
         const float correction_volts = pid_controller_update(&pid, reference_kv, feedback_kv, CONTROL_TASK_PERIOD_S);
         dac_volts = control_task_reference_to_feedforward_volts(reference_kv) + correction_volts;
         dac_volts = control_task_clamp(dac_volts, CONTROL_DAC_MIN_VOLTS, CONTROL_DAC_MAX_VOLTS);

@@ -55,6 +55,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     app/drivers/touch/goodix_touch.c
     app/drivers/touch/touch_i2c.c
     app/drivers/touch/touch_lvgl.c
+    app/lib/filter/feedback_filter.c
     app/lib/pid/pid_controller.c
     app/lib/rls/rls_estimator.c
 )
@@ -68,6 +69,7 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     app/drivers/lcd
     app/drivers/sdram
     app/drivers/touch
+    app/lib/filter
     app/lib/pid
     app/lib/rls
 )
