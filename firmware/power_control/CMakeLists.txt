@@ -53,6 +53,8 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     app/drivers/touch/goodix_touch.c
     app/drivers/touch/touch_i2c.c
     app/drivers/touch/touch_lvgl.c
+    app/lib/control/pid_controller.c
+    app/lib/control/rls_estimator.c
 )
 
 # Add include paths
@@ -63,6 +65,7 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     app/drivers/lcd
     app/drivers/sdram
     app/drivers/touch
+    app/lib/control
 )
 
 # Add project symbols (macros)
