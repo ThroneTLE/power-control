@@ -8,12 +8,15 @@
 #include "lvgl.h"
 #include "touch_lvgl.h"
 
-#define LCD_TASK_PERIOD_MS       5U
-#define AD5593R_WAVE_PERIOD_MS   20U
+#include <string.h>
+
+#define LCD_TASK_PERIOD_MS       2U
+#define AD5593R_WAVE_PERIOD_MS   16U
+#define AD5593R_UI_I2C_TIMEOUT_MS 5U
 #define TOUCH_INIT_DELAY_MS      500U
-#define TOUCH_INIT_RETRY_MS      1000U
-#define TOUCH_DEBUG_PERIOD_MS    200U
-#define AD5593R_CHART_POINTS     128U
+#define TOUCH_INIT_RETRY_MS      500U
+#define TOUCH_DEBUG_PERIOD_MS    50U
+#define AD5593R_CHART_POINTS     96U
 #define AD5593R_WAVE_POINTS      64U
 #define AD5593R_TEST_DAC_CHANNEL 0U
 #define AD5593R_TEST_ADC_CHANNEL 4U
@@ -64,7 +67,7 @@ void lcd_task_entry(void *argument)
   ad5593r_handle_t ad5593r = {0};
   const ad5593r_config_t ad5593r_config = {
       .i2c = &hi2c1,
-      .timeout_ms = AD5593R_DEFAULT_TIMEOUT_MS,
+      .timeout_ms = AD5593R_UI_I2C_TIMEOUT_MS,
       .vref_mv = AD5593R_DEFAULT_VREF_MV,
       .dac_mask = AD5593R_TEST_DAC_MASK,
       .adc_mask = AD5593R_TEST_ADC_MASK,
@@ -112,6 +115,9 @@ void lcd_task_entry(void *argument)
 
   for (;;)
   {
+    lv_tick_inc(LCD_TASK_PERIOD_MS);
+    lv_timer_handler();
+
     if (!touch_initialized && elapsed_ms >= TOUCH_INIT_DELAY_MS &&
         (elapsed_ms - last_touch_init_attempt_ms) >= TOUCH_INIT_RETRY_MS)
     {
@@ -148,8 +154,6 @@ void lcd_task_entry(void *argument)
       wave_elapsed_ms = 0U;
     }
 
-    lv_tick_inc(LCD_TASK_PERIOD_MS);
-    lv_timer_handler();
     osDelay(LCD_TASK_PERIOD_MS);
     elapsed_ms += LCD_TASK_PERIOD_MS;
     wave_elapsed_ms += LCD_TASK_PERIOD_MS;
@@ -169,25 +173,30 @@ static void lcd_ad5593r_create_ui(lcd_ad5593r_ui_t *ui)
 
   title = lv_label_create(screen);
   lv_label_set_text(title, "AD5593R IO0 to IO4 Loopback");
-  lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 8);
+  lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
+  lv_obj_align(title, LV_ALIGN_TOP_LEFT, 16, 4);
 
   ui->status_label = lv_label_create(screen);
+  lv_obj_set_style_text_font(ui->status_label, &lv_font_montserrat_16, 0);
   lv_label_set_text(ui->status_label, "AD5593R starting...");
-  lv_obj_align(ui->status_label, LV_ALIGN_TOP_MID, 0, 34);
+  lv_obj_align(ui->status_label, LV_ALIGN_TOP_LEFT, 16, 34);
 
   ui->value_label = lv_label_create(screen);
+  lv_obj_set_style_text_font(ui->value_label, &lv_font_montserrat_20, 0);
   lv_label_set_text(ui->value_label, "IO0 DAC -- | IO4 ADC --");
-  lv_obj_align(ui->value_label, LV_ALIGN_TOP_MID, 0, 58);
+  lv_obj_align(ui->value_label, LV_ALIGN_TOP_LEFT, 16, 56);
 
   ui->touch_debug_label = lv_label_create(screen);
   lv_label_set_long_mode(ui->touch_debug_label, LV_LABEL_LONG_MODE_WRAP);
-  lv_obj_set_width(ui->touch_debug_label, 230);
-  lv_obj_align(ui->touch_debug_label, LV_ALIGN_TOP_LEFT, 10, 10);
+  lv_obj_set_width(ui->touch_debug_label, 310);
+  lv_obj_set_style_text_font(ui->touch_debug_label, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_align(ui->touch_debug_label, LV_TEXT_ALIGN_RIGHT, 0);
+  lv_obj_align(ui->touch_debug_label, LV_ALIGN_TOP_RIGHT, -12, 8);
   lv_label_set_text(ui->touch_debug_label, "TP: waiting");
 
   ui->chart = lv_chart_create(screen);
-  lv_obj_set_size(ui->chart, 760, 280);
-  lv_obj_align(ui->chart, LV_ALIGN_TOP_MID, 0, 88);
+  lv_obj_set_size(ui->chart, 760, 225);
+  lv_obj_align(ui->chart, LV_ALIGN_TOP_MID, 0, 84);
   lv_chart_set_type(ui->chart, LV_CHART_TYPE_LINE);
   lv_chart_set_point_count(ui->chart, AD5593R_CHART_POINTS);
   lv_chart_set_update_mode(ui->chart, LV_CHART_UPDATE_MODE_SHIFT);
@@ -209,18 +218,27 @@ static void lcd_ad5593r_create_ui(lcd_ad5593r_ui_t *ui)
   }
 
   legend = lv_label_create(screen);
+  lv_obj_set_style_text_font(legend, &lv_font_montserrat_16, 0);
   lv_label_set_text(legend, "Orange: IO0 DAC output    Blue: IO4 ADC input");
-  lv_obj_align(legend, LV_ALIGN_TOP_MID, 0, 372);
+  lv_obj_align(legend, LV_ALIGN_TOP_MID, 0, 314);
 
   ui->table = lv_table_create(screen);
   lv_table_set_column_count(ui->table, 4U);
   lv_table_set_row_count(ui->table, 3U);
-  lv_table_set_column_width(ui->table, 0U, 120);
-  lv_table_set_column_width(ui->table, 1U, 160);
-  lv_table_set_column_width(ui->table, 2U, 180);
-  lv_table_set_column_width(ui->table, 3U, 220);
-  lv_obj_set_size(ui->table, 700, 82);
-  lv_obj_align(ui->table, LV_ALIGN_TOP_MID, 0, 396);
+  lv_table_set_column_width(ui->table, 0U, 100);
+  lv_table_set_column_width(ui->table, 1U, 150);
+  lv_table_set_column_width(ui->table, 2U, 210);
+  lv_table_set_column_width(ui->table, 3U, 300);
+  lv_obj_set_size(ui->table, 760, 136);
+  lv_obj_align(ui->table, LV_ALIGN_TOP_MID, 0, 338);
+  lv_obj_set_style_text_font(ui->table, &lv_font_montserrat_20, LV_PART_ITEMS);
+  lv_obj_set_style_text_align(ui->table, LV_TEXT_ALIGN_CENTER, LV_PART_ITEMS);
+  lv_obj_set_style_pad_top(ui->table, 10, LV_PART_ITEMS);
+  lv_obj_set_style_pad_bottom(ui->table, 10, LV_PART_ITEMS);
+  lv_obj_set_style_pad_left(ui->table, 8, LV_PART_ITEMS);
+  lv_obj_set_style_pad_right(ui->table, 8, LV_PART_ITEMS);
+  lv_obj_set_style_radius(ui->table, 4, 0);
+  lv_obj_set_style_border_width(ui->table, 1, 0);
 
   lv_table_set_cell_value(ui->table, 0U, 0U, "CH");
   lv_table_set_cell_value(ui->table, 0U, 1U, "Mode");
@@ -240,18 +258,29 @@ static void lcd_ad5593r_create_ui(lcd_ad5593r_ui_t *ui)
 
 static void lcd_ad5593r_set_status(lcd_ad5593r_ui_t *ui, const char *prefix, ad5593r_status_t status)
 {
+  const char *current_text = NULL;
+  char next_text[96] = {0};
+
   if (ui == NULL || ui->status_label == NULL || prefix == NULL)
   {
     return;
   }
 
+  current_text = lv_label_get_text(ui->status_label);
   if (status == AD5593R_STATUS_OK)
   {
-    lv_label_set_text(ui->status_label, prefix);
+    if (current_text == NULL || strcmp(current_text, prefix) != 0)
+    {
+      lv_label_set_text(ui->status_label, prefix);
+    }
   }
   else
   {
-    lv_label_set_text_fmt(ui->status_label, "%s: %s", prefix, lcd_ad5593r_status_text(status));
+    lv_snprintf(next_text, sizeof(next_text), "%s: %s", prefix, lcd_ad5593r_status_text(status));
+    if (current_text == NULL || strcmp(current_text, next_text) != 0)
+    {
+      lv_label_set_text(ui->status_label, next_text);
+    }
   }
 }
 

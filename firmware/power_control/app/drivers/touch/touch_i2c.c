@@ -2,7 +2,8 @@
 
 #include "main.h"
 
-#define TOUCH_I2C_ACK_TIMEOUT 250U
+#define TOUCH_I2C_ACK_TIMEOUT   250U
+#define TOUCH_I2C_DELAY_CYCLES  80U
 
 static void touch_i2c_delay(void);
 static void touch_i2c_start(void);
@@ -83,7 +84,7 @@ bool touch_i2c_read(uint8_t address, uint16_t reg, uint8_t *data, size_t length)
 
 static void touch_i2c_delay(void)
 {
-  for (volatile uint32_t i = 0; i < 160U; ++i)
+  for (volatile uint32_t i = 0; i < TOUCH_I2C_DELAY_CYCLES; ++i)
   {
     __NOP();
   }
@@ -233,27 +234,41 @@ static void touch_i2c_config_gpio(void)
   gpio.Pin = CTP_SCL_Pin;
   gpio.Mode = GPIO_MODE_OUTPUT_PP;
   gpio.Pull = GPIO_PULLUP;
-  gpio.Speed = GPIO_SPEED_FREQ_MEDIUM;
+  gpio.Speed = GPIO_SPEED_FREQ_HIGH;
   HAL_GPIO_Init(CTP_SCL_GPIO_Port, &gpio);
 
   gpio.Pin = CTP_SDA_Pin;
   gpio.Mode = GPIO_MODE_OUTPUT_OD;
   gpio.Pull = GPIO_PULLUP;
-  gpio.Speed = GPIO_SPEED_FREQ_MEDIUM;
+  gpio.Speed = GPIO_SPEED_FREQ_HIGH;
   HAL_GPIO_Init(CTP_SDA_GPIO_Port, &gpio);
 }
 
 static void touch_scl_write(GPIO_PinState state)
 {
-  HAL_GPIO_WritePin(CTP_SCL_GPIO_Port, CTP_SCL_Pin, state);
+  if (state == GPIO_PIN_SET)
+  {
+    CTP_SCL_GPIO_Port->BSRR = CTP_SCL_Pin;
+  }
+  else
+  {
+    CTP_SCL_GPIO_Port->BSRR = (uint32_t)CTP_SCL_Pin << 16U;
+  }
 }
 
 static void touch_sda_write(GPIO_PinState state)
 {
-  HAL_GPIO_WritePin(CTP_SDA_GPIO_Port, CTP_SDA_Pin, state);
+  if (state == GPIO_PIN_SET)
+  {
+    CTP_SDA_GPIO_Port->BSRR = CTP_SDA_Pin;
+  }
+  else
+  {
+    CTP_SDA_GPIO_Port->BSRR = (uint32_t)CTP_SDA_Pin << 16U;
+  }
 }
 
 static GPIO_PinState touch_sda_read(void)
 {
-  return HAL_GPIO_ReadPin(CTP_SDA_GPIO_Port, CTP_SDA_Pin);
+  return ((CTP_SDA_GPIO_Port->IDR & CTP_SDA_Pin) != 0U) ? GPIO_PIN_SET : GPIO_PIN_RESET;
 }
