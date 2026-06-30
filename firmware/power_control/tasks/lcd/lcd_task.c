@@ -50,7 +50,8 @@ void lcd_task_entry(void *argument)
   lv_obj_add_event_cb(button, touch_test_button_event_cb, LV_EVENT_CLICKED, button_label);
 
   lv_obj_t *debug_label = lv_label_create(lv_screen_active());
-  lv_obj_set_width(debug_label, 780);
+  lv_label_set_long_mode(debug_label, LV_LABEL_LONG_MODE_WRAP);
+  lv_obj_set_width(debug_label, 360);
   lv_obj_align(debug_label, LV_ALIGN_TOP_LEFT, 10, 10);
   lv_label_set_text(debug_label, "TP: waiting");
 
@@ -89,12 +90,15 @@ static void touch_test_button_event_cb(lv_event_t *event)
 static void update_touch_debug_label(lv_obj_t *label)
 {
   goodix_touch_diagnostics_t diag = {0};
-  char text[128] = {0};
+  char text[160] = {0};
 
   goodix_touch_get_diagnostics(&diag);
   lv_snprintf(text,
               sizeof(text),
-              "TP %s ADDR:%02X PID:%s STA:%02X XY:%u,%u RAW:%u,%u CNT:%lu ERR:%u",
+              "TP %s ADDR:%02X PID:%s STA:%02X\n"
+              "XY : %u,%u\n"
+              "RAW: %u,%u\n"
+              "CNT:%lu ERR:%u",
               touch_lvgl_is_initialized() ? "OK" : "FAIL",
               diag.address,
               diag.pid,

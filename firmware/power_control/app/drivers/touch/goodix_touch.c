@@ -127,8 +127,8 @@ bool goodix_touch_read(goodix_touch_point_t *point)
 
   (void)goodix_write_u8(GOODIX_REG_STATUS, 0x00U);
 
-  raw_x = (uint16_t)data[1] | ((uint16_t)data[2] << 8U);
-  raw_y = (uint16_t)data[3] | ((uint16_t)data[4] << 8U);
+  raw_x = (uint16_t)data[0] | ((uint16_t)data[1] << 8U);
+  raw_y = (uint16_t)data[2] | ((uint16_t)data[3] << 8U);
 
   goodix_diagnostics.raw_x = raw_x;
   goodix_diagnostics.raw_y = raw_y;
