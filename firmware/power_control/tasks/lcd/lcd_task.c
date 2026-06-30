@@ -50,6 +50,7 @@ static void update_touch_debug_label(lv_obj_t *label);
 static int32_t lcd_control_kv_to_centikv(float kv);
 static float lcd_control_centikv_to_kv(int32_t centikv);
 static int32_t lcd_control_clamp_centikv(int32_t centikv);
+static int32_t lcd_control_volts_to_millivolts(float volts);
 
 void start_lcd_task(void *argument)
 {
@@ -154,12 +155,12 @@ static void lcd_control_create_ui(lcd_control_ui_t *ui)
 
   ui->feedback_label = lv_label_create(screen);
   lv_obj_set_style_text_font(ui->feedback_label, &lv_font_montserrat_24, 0);
-  lv_label_set_text(ui->feedback_label, "Feedback 0.00 kV");
+  lv_label_set_text(ui->feedback_label, "Current 0.000 V");
   lv_obj_align(ui->feedback_label, LV_ALIGN_TOP_LEFT, 260, 70);
 
   ui->dac_label = lv_label_create(screen);
   lv_obj_set_style_text_font(ui->dac_label, &lv_font_montserrat_20, 0);
-  lv_label_set_text(ui->dac_label, "DAC 0.00 V");
+  lv_label_set_text(ui->dac_label, "Control Output 0.000 V");
   lv_obj_align(ui->dac_label, LV_ALIGN_TOP_LEFT, 540, 74);
 
   slider_label = lv_label_create(screen);
@@ -225,6 +226,8 @@ static void lcd_control_update_ui(lcd_control_ui_t *ui, const control_snapshot_t
 {
   int32_t reference_centikv = 0;
   int32_t feedback_centikv = 0;
+  int32_t current_millivolts = 0;
+  int32_t dac_millivolts = 0;
 
   if (ui == NULL || snapshot == NULL)
   {
@@ -233,6 +236,8 @@ static void lcd_control_update_ui(lcd_control_ui_t *ui, const control_snapshot_t
 
   reference_centikv = lcd_control_kv_to_centikv(snapshot->reference_kv);
   feedback_centikv = lcd_control_kv_to_centikv(snapshot->feedback_kv);
+  current_millivolts = lcd_control_volts_to_millivolts(snapshot->feedback_kv * 1000.0f);
+  dac_millivolts = lcd_control_volts_to_millivolts(snapshot->dac_volts);
 
   if (ui->status_label != NULL)
   {
@@ -250,15 +255,17 @@ static void lcd_control_update_ui(lcd_control_ui_t *ui, const control_snapshot_t
   if (ui->feedback_label != NULL)
   {
     lv_label_set_text_fmt(ui->feedback_label,
-                          "Feedback %ld.%02ld kV",
-                          (long)(feedback_centikv / 100),
-                          (long)(feedback_centikv % 100));
+                          "Current %ld.%03ld V",
+                          (long)(current_millivolts / 1000),
+                          (long)(current_millivolts % 1000));
   }
 
   if (ui->dac_label != NULL)
   {
-    const int32_t dac_centivolts = (int32_t)((snapshot->dac_volts * 100.0f) + 0.5f);
-    lv_label_set_text_fmt(ui->dac_label, "DAC %ld.%02ld V", (long)(dac_centivolts / 100), (long)(dac_centivolts % 100));
+    lv_label_set_text_fmt(ui->dac_label,
+                          "Control Output %ld.%03ld V",
+                          (long)(dac_millivolts / 1000),
+                          (long)(dac_millivolts % 1000));
   }
 
   if (ui->fault_label != NULL)
@@ -403,4 +410,14 @@ static int32_t lcd_control_clamp_centikv(int32_t centikv)
   }
 
   return centikv;
+}
+
+static int32_t lcd_control_volts_to_millivolts(float volts)
+{
+  if (volts < 0.0f)
+  {
+    return 0;
+  }
+
+  return (int32_t)((volts * 1000.0f) + 0.5f);
 }
