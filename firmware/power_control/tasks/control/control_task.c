@@ -20,14 +20,17 @@
 #define CONTROL_DAC_MAX_VOLTS    5.0f
 #define CONTROL_ADC_MAX_KV       5.0f
 
-#define CONTROL_PID_KP 0.8f
-#define CONTROL_PID_KI 0.4f
+#define CONTROL_PID_KP 0.5f
+#define CONTROL_PID_KI 0.2f
 #define CONTROL_PID_KD 0.0f
 #define CONTROL_PID_INTEGRAL_LIMIT (CONTROL_DAC_MAX_VOLTS / CONTROL_PID_KI)
+#define CONTROL_SETPOINT_RATE_LIMIT 5.0f
+#define CONTROL_OUTPUT_RATE_LIMIT   5.0f
 
 static bool control_task_init_ad5593r(ad5593r_handle_t *ad5593r);
 static bool control_task_init_pid(pid_controller_t *pid);
 static bool control_task_read_feedback(ad5593r_handle_t *ad5593r, float *feedback_kv);
+static float control_task_reference_to_feedforward_volts(float reference_kv);
 static uint16_t control_task_volts_to_raw(float volts);
 static float control_task_millivolts_to_feedback_kv(uint16_t millivolts);
 static float control_task_clamp(float value, float min_value, float max_value);
@@ -75,7 +78,8 @@ void control_task_entry(void *argument)
 
       if (control_task_read_feedback(&ad5593r, &feedback_kv))
       {
-        dac_volts = pid_controller_update(&pid, reference_kv, feedback_kv, CONTROL_TASK_PERIOD_S);
+        const float correction_volts = pid_controller_update(&pid, reference_kv, feedback_kv, CONTROL_TASK_PERIOD_S);
+        dac_volts = control_task_reference_to_feedforward_volts(reference_kv) + correction_volts;
         dac_volts = control_task_clamp(dac_volts, CONTROL_DAC_MIN_VOLTS, CONTROL_DAC_MAX_VOLTS);
         dac_raw = control_task_volts_to_raw(dac_volts);
 
@@ -133,8 +137,8 @@ static bool control_task_init_pid(pid_controller_t *pid)
       .output_max = CONTROL_DAC_MAX_VOLTS,
       .integral_min = -CONTROL_PID_INTEGRAL_LIMIT,
       .integral_max = CONTROL_PID_INTEGRAL_LIMIT,
-      .setpoint_rate_limit = 1.0f,
-      .output_rate_limit = 2.0f,
+      .setpoint_rate_limit = CONTROL_SETPOINT_RATE_LIMIT,
+      .output_rate_limit = CONTROL_OUTPUT_RATE_LIMIT,
       .derivative_filter_tau = 0.0f,
   };
 
@@ -171,6 +175,14 @@ static bool control_task_read_feedback(ad5593r_handle_t *ad5593r, float *feedbac
   }
 
   return false;
+}
+
+static float control_task_reference_to_feedforward_volts(float reference_kv)
+{
+  const float clamped_reference =
+      control_task_clamp(reference_kv, CONTROL_REFERENCE_MIN_KV, CONTROL_REFERENCE_MAX_KV);
+
+  return (clamped_reference / CONTROL_REFERENCE_MAX_KV) * CONTROL_DAC_MAX_VOLTS;
 }
 
 static uint16_t control_task_volts_to_raw(float volts)
