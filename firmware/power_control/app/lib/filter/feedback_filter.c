@@ -4,7 +4,6 @@
 #define FEEDBACK_FILTER_ALPHA_MAX 1.0f
 
 static float feedback_filter_clamp_alpha(float alpha);
-static float feedback_filter_median3(float a, float b, float c);
 
 void feedback_filter_init(feedback_filter_t *filter, float alpha, float initial_value)
 {
@@ -15,9 +14,11 @@ void feedback_filter_init(feedback_filter_t *filter, float alpha, float initial_
 
   filter->alpha = feedback_filter_clamp_alpha(alpha);
   filter->initial_value = initial_value;
-  filter->samples[0] = initial_value;
-  filter->samples[1] = initial_value;
-  filter->samples[2] = initial_value;
+  for (uint8_t i = 0U; i < FEEDBACK_FILTER_AVERAGE_WINDOW; ++i)
+  {
+    filter->samples[i] = initial_value;
+  }
+  filter->sum = 0.0f;
   filter->output = initial_value;
   filter->sample_count = 0U;
   filter->next_index = 0U;
@@ -26,35 +27,37 @@ void feedback_filter_init(feedback_filter_t *filter, float alpha, float initial_
 
 float feedback_filter_update(feedback_filter_t *filter, float input)
 {
-  float median = input;
+  float average = input;
 
   if (filter == 0)
   {
     return input;
   }
 
-  filter->samples[filter->next_index] = input;
-  filter->next_index = (uint8_t)((filter->next_index + 1U) % 3U);
-  if (filter->sample_count < 3U)
+  if (filter->sample_count < FEEDBACK_FILTER_AVERAGE_WINDOW)
   {
+    filter->samples[filter->next_index] = input;
+    filter->sum += input;
     filter->sample_count++;
   }
-
-  if (filter->sample_count < 3U)
+  else
   {
-    return filter->output;
+    filter->sum -= filter->samples[filter->next_index];
+    filter->samples[filter->next_index] = input;
+    filter->sum += input;
   }
 
-  median = feedback_filter_median3(filter->samples[0], filter->samples[1], filter->samples[2]);
+  filter->next_index = (uint8_t)((filter->next_index + 1U) % FEEDBACK_FILTER_AVERAGE_WINDOW);
+  average = filter->sum / (float)filter->sample_count;
 
   if (filter->initialized == 0U)
   {
-    filter->output = median;
+    filter->output = average;
     filter->initialized = 1U;
   }
   else
   {
-    filter->output += filter->alpha * (median - filter->output);
+    filter->output += filter->alpha * (average - filter->output);
   }
 
   return filter->output;
@@ -77,9 +80,11 @@ void feedback_filter_reset(feedback_filter_t *filter, float value)
     return;
   }
 
-  filter->samples[0] = value;
-  filter->samples[1] = value;
-  filter->samples[2] = value;
+  for (uint8_t i = 0U; i < FEEDBACK_FILTER_AVERAGE_WINDOW; ++i)
+  {
+    filter->samples[i] = value;
+  }
+  filter->sum = 0.0f;
   filter->output = value;
   filter->sample_count = 0U;
   filter->next_index = 0U;
@@ -99,28 +104,4 @@ static float feedback_filter_clamp_alpha(float alpha)
   }
 
   return alpha;
-}
-
-static float feedback_filter_median3(float a, float b, float c)
-{
-  if (a > b)
-  {
-    const float temp = a;
-    a = b;
-    b = temp;
-  }
-
-  if (b > c)
-  {
-    const float temp = b;
-    b = c;
-    c = temp;
-  }
-
-  if (a > b)
-  {
-    b = a;
-  }
-
-  return b;
 }

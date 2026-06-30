@@ -7,11 +7,14 @@ extern "C" {
 
 #include <stdint.h>
 
+#define FEEDBACK_FILTER_AVERAGE_WINDOW 10U
+
 typedef struct
 {
   float alpha;
   float initial_value;
-  float samples[3];
+  float samples[FEEDBACK_FILTER_AVERAGE_WINDOW];
+  float sum;
   float output;
   uint8_t sample_count;
   uint8_t next_index;
