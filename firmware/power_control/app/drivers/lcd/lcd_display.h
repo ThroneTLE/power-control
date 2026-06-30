@@ -10,6 +10,7 @@ extern "C" {
 
 #define LCD_DISPLAY_WIDTH       800U
 #define LCD_DISPLAY_HEIGHT      480U
+#define LCD_FRAMEBUFFER_SIZE    (LCD_DISPLAY_WIDTH * LCD_DISPLAY_HEIGHT * 2U)
 #define LCD_FRAMEBUFFER_ADDRESS 0xC0000000UL
 
 void lcd_display_reset(void);
