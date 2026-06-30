@@ -19,6 +19,10 @@
 
 static uint8_t goodix_address = GOODIX_ADDRESS_PRIMARY;
 static bool goodix_initialized = false;
+static goodix_touch_diagnostics_t goodix_diagnostics = {
+    .address = GOODIX_ADDRESS_PRIMARY,
+    .pid = "----",
+};
 
 static bool goodix_probe_address(uint8_t address);
 static bool goodix_write_u8(uint16_t reg, uint8_t value);
@@ -31,6 +35,12 @@ static void goodix_map_point(uint16_t raw_x, uint16_t raw_y, goodix_touch_point_
 bool goodix_touch_init(void)
 {
   uint8_t control = 0U;
+
+  goodix_initialized = false;
+  goodix_diagnostics.initialized = false;
+  goodix_diagnostics.error = 0U;
+  goodix_diagnostics.status = 0U;
+  memcpy(goodix_diagnostics.pid, "----", 5U);
 
   touch_i2c_init();
   goodix_reset();
@@ -45,7 +55,7 @@ bool goodix_touch_init(void)
   }
   else
   {
-    goodix_initialized = false;
+    goodix_diagnostics.error = 1U;
     return false;
   }
 
@@ -56,12 +66,14 @@ bool goodix_touch_init(void)
   control = 0x00U;
   if (!goodix_write_u8(GOODIX_REG_CONTROL, control))
   {
-    goodix_initialized = false;
+    goodix_diagnostics.error = 2U;
     return false;
   }
 
   (void)goodix_write_u8(GOODIX_REG_STATUS, 0x00U);
   goodix_initialized = true;
+  goodix_diagnostics.initialized = true;
+  goodix_diagnostics.error = 0U;
   return true;
 }
 
@@ -75,13 +87,17 @@ bool goodix_touch_read(goodix_touch_point_t *point)
 
   if (!goodix_initialized || point == NULL)
   {
+    goodix_diagnostics.error = 3U;
     return false;
   }
 
   if (!goodix_read(GOODIX_REG_STATUS, &status, 1U))
   {
+    goodix_diagnostics.error = 4U;
     return false;
   }
+
+  goodix_diagnostics.status = status;
 
   if ((status & GOODIX_STATUS_READY_MASK) == 0U)
   {
@@ -98,12 +114,14 @@ bool goodix_touch_read(goodix_touch_point_t *point)
   if (points > 5U)
   {
     (void)goodix_write_u8(GOODIX_REG_STATUS, 0x00U);
+    goodix_diagnostics.error = 5U;
     return false;
   }
 
   if (!goodix_read(GOODIX_REG_POINT1, data, sizeof(data)))
   {
     (void)goodix_write_u8(GOODIX_REG_STATUS, 0x00U);
+    goodix_diagnostics.error = 6U;
     return false;
   }
 
@@ -112,8 +130,22 @@ bool goodix_touch_read(goodix_touch_point_t *point)
   raw_x = (uint16_t)data[1] | ((uint16_t)data[2] << 8U);
   raw_y = (uint16_t)data[3] | ((uint16_t)data[4] << 8U);
 
+  goodix_diagnostics.raw_x = raw_x;
+  goodix_diagnostics.raw_y = raw_y;
   goodix_map_point(raw_x, raw_y, point);
+  goodix_diagnostics.x = point->x;
+  goodix_diagnostics.y = point->y;
+  goodix_diagnostics.read_count++;
+  goodix_diagnostics.error = 0U;
   return true;
+}
+
+void goodix_touch_get_diagnostics(goodix_touch_diagnostics_t *diagnostics)
+{
+  if (diagnostics != NULL)
+  {
+    *diagnostics = goodix_diagnostics;
+  }
 }
 
 static bool goodix_probe_address(uint8_t address)
@@ -126,9 +158,16 @@ static bool goodix_probe_address(uint8_t address)
   }
 
   pid[4] = '\0';
-  return memcmp(pid, "911", 3U) == 0 || memcmp(pid, "9147", 4U) == 0 ||
-         memcmp(pid, "115", 3U) == 0 || memcmp(pid, "9271", 4U) == 0 ||
-         memcmp(pid, "967", 3U) == 0;
+  if (memcmp(pid, "911", 3U) == 0 || memcmp(pid, "9147", 4U) == 0 ||
+      memcmp(pid, "115", 3U) == 0 || memcmp(pid, "9271", 4U) == 0 ||
+      memcmp(pid, "967", 3U) == 0)
+  {
+    goodix_diagnostics.address = address;
+    memcpy(goodix_diagnostics.pid, pid, sizeof(goodix_diagnostics.pid));
+    return true;
+  }
+
+  return false;
 }
 
 static bool goodix_write_u8(uint16_t reg, uint8_t value)

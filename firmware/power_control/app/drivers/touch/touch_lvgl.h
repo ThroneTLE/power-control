@@ -9,6 +9,7 @@ extern "C" {
 #include "lvgl.h"
 
 bool touch_lvgl_init(lv_display_t *display);
+bool touch_lvgl_is_initialized(void);
 
 #ifdef __cplusplus
 }

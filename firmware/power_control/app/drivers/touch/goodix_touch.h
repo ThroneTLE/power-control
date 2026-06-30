@@ -14,8 +14,23 @@ typedef struct
   uint16_t y;
 } goodix_touch_point_t;
 
+typedef struct
+{
+  bool initialized;
+  uint8_t address;
+  char pid[5];
+  uint8_t status;
+  uint16_t raw_x;
+  uint16_t raw_y;
+  uint16_t x;
+  uint16_t y;
+  uint32_t read_count;
+  uint8_t error;
+} goodix_touch_diagnostics_t;
+
 bool goodix_touch_init(void);
 bool goodix_touch_read(goodix_touch_point_t *point);
+void goodix_touch_get_diagnostics(goodix_touch_diagnostics_t *diagnostics);
 
 #ifdef __cplusplus
 }
