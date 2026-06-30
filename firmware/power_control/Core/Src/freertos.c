@@ -62,6 +62,13 @@ const osThreadAttr_t lcd_task_attributes = {
   .stack_size = 1024 * 4,
   .priority = (osPriority_t) osPriorityNormal,
 };
+/* Definitions for control_task */
+osThreadId_t control_taskHandle;
+const osThreadAttr_t control_task_attributes = {
+  .name = "control_task",
+  .stack_size = 1024 * 4,
+  .priority = (osPriority_t) osPriorityAboveNormal,
+};
 
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN FunctionPrototypes */
@@ -70,6 +77,7 @@ const osThreadAttr_t lcd_task_attributes = {
 
 void StartDefaultTask(void *argument);
 void start_lcd_task(void *argument);
+void start_control_task(void *argument);
 
 void MX_FREERTOS_Init(void); /* (MISRA C 2004 rule 8.1) */
 
@@ -105,6 +113,9 @@ void MX_FREERTOS_Init(void) {
 
   /* creation of lcd_task */
   lcd_taskHandle = osThreadNew(start_lcd_task, NULL, &lcd_task_attributes);
+
+  /* creation of control_task */
+  control_taskHandle = osThreadNew(start_control_task, NULL, &control_task_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
@@ -150,6 +161,24 @@ __weak void start_lcd_task(void *argument)
     osDelay(1);
   }
   /* USER CODE END start_lcd_task */
+}
+
+/* USER CODE BEGIN Header_start_control_task */
+/**
+* @brief Function implementing the control_task thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_start_control_task */
+__weak void start_control_task(void *argument)
+{
+  /* USER CODE BEGIN start_control_task */
+  /* Infinite loop */
+  for(;;)
+  {
+    osDelay(1);
+  }
+  /* USER CODE END start_control_task */
 }
 
 /* Private application code --------------------------------------------------*/

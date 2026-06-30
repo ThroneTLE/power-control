@@ -1,60 +1,55 @@
 #include "lcd_task.h"
 
-#include "ad5593r.h"
+#include "control_context.h"
 #include "cmsis_os2.h"
 #include "goodix_touch.h"
-#include "i2c.h"
 #include "lcd_display.h"
 #include "lvgl.h"
 #include "touch_lvgl.h"
 
-#include <string.h>
+#include <stdbool.h>
+#include <stdint.h>
 
-#define LCD_TASK_PERIOD_MS       2U
-#define AD5593R_WAVE_PERIOD_MS   16U
-#define AD5593R_UI_I2C_TIMEOUT_MS 5U
-#define TOUCH_INIT_DELAY_MS      500U
-#define TOUCH_INIT_RETRY_MS      500U
-#define TOUCH_DEBUG_PERIOD_MS    50U
-#define AD5593R_CHART_POINTS     96U
-#define AD5593R_WAVE_POINTS      64U
-#define AD5593R_TEST_DAC_CHANNEL 0U
-#define AD5593R_TEST_ADC_CHANNEL 4U
-#define AD5593R_TEST_DAC_MASK    (1U << AD5593R_TEST_DAC_CHANNEL)
-#define AD5593R_TEST_ADC_MASK    (1U << AD5593R_TEST_ADC_CHANNEL)
+#define LCD_TASK_PERIOD_MS    2U
+#define TOUCH_INIT_DELAY_MS   500U
+#define TOUCH_INIT_RETRY_MS   500U
+#define TOUCH_DEBUG_PERIOD_MS 50U
+#define UI_UPDATE_PERIOD_MS   100U
+
+#define CONTROL_REFERENCE_STEP_CENTIKV 10
+#define CONTROL_REFERENCE_MIN_CENTIKV  0
+#define CONTROL_REFERENCE_MAX_CENTIKV  500
+#define CONTROL_CHART_POINTS           120U
 
 typedef struct
 {
   lv_obj_t *status_label;
-  lv_obj_t *value_label;
+  lv_obj_t *reference_label;
+  lv_obj_t *feedback_label;
+  lv_obj_t *dac_label;
+  lv_obj_t *fault_label;
   lv_obj_t *touch_debug_label;
+  lv_obj_t *reference_slider;
+  lv_obj_t *enable_switch;
   lv_obj_t *chart;
-  lv_chart_series_t *dac_series;
-  lv_chart_series_t *adc_series;
-  lv_obj_t *table;
-} lcd_ad5593r_ui_t;
+  lv_chart_series_t *reference_series;
+  lv_chart_series_t *feedback_series;
+} lcd_control_ui_t;
 
-static void lcd_ad5593r_create_ui(lcd_ad5593r_ui_t *ui);
-static void lcd_ad5593r_set_status(lcd_ad5593r_ui_t *ui, const char *prefix, ad5593r_status_t status);
-static void lcd_ad5593r_update_wave_ui(lcd_ad5593r_ui_t *ui,
-                                       ad5593r_handle_t *ad5593r,
-                                       uint16_t dac_raw,
-                                       const ad5593r_channel_sample_t *adc_sample);
-static ad5593r_status_t lcd_ad5593r_read_adc_channel(ad5593r_handle_t *ad5593r,
-                                                     uint8_t channel,
-                                                     ad5593r_channel_sample_t *sample);
+static void lcd_control_create_ui(lcd_control_ui_t *ui);
+static void lcd_control_update_ui(lcd_control_ui_t *ui, const control_snapshot_t *snapshot);
+static void lcd_control_reference_slider_event(lv_event_t *event);
+static void lcd_control_reference_step_event(lv_event_t *event);
+static void lcd_control_enable_event(lv_event_t *event);
+static lv_obj_t *lcd_control_create_step_button(lv_obj_t *parent,
+                                                const char *text,
+                                                int32_t x,
+                                                int32_t y,
+                                                int32_t step_centikv);
 static void update_touch_debug_label(lv_obj_t *label);
-static const char *lcd_ad5593r_status_text(ad5593r_status_t status);
-
-static const uint16_t lcd_ad5593r_sine_raw[AD5593R_WAVE_POINTS] = {
-    2048U, 2209U, 2368U, 2523U, 2675U, 2820U, 2958U, 3087U,
-    3206U, 3314U, 3410U, 3493U, 3561U, 3615U, 3655U, 3678U,
-    3686U, 3678U, 3655U, 3615U, 3561U, 3493U, 3410U, 3314U,
-    3206U, 3087U, 2958U, 2820U, 2675U, 2523U, 2368U, 2209U,
-    2048U, 1887U, 1728U, 1573U, 1421U, 1276U, 1138U, 1009U,
-    890U,  782U,  686U,  603U,  535U,  481U,  441U,  418U,
-    410U,  418U,  441U,  481U,  535U,  603U,  686U,  782U,
-    890U,  1009U, 1138U, 1276U, 1421U, 1573U, 1728U, 1887U};
+static int32_t lcd_control_kv_to_centikv(float kv);
+static float lcd_control_centikv_to_kv(int32_t centikv);
+static int32_t lcd_control_clamp_centikv(int32_t centikv);
 
 void start_lcd_task(void *argument)
 {
@@ -64,25 +59,13 @@ void start_lcd_task(void *argument)
 void lcd_task_entry(void *argument)
 {
   lv_display_t *display = NULL;
-  ad5593r_handle_t ad5593r = {0};
-  const ad5593r_config_t ad5593r_config = {
-      .i2c = &hi2c1,
-      .timeout_ms = AD5593R_UI_I2C_TIMEOUT_MS,
-      .vref_mv = AD5593R_DEFAULT_VREF_MV,
-      .dac_mask = AD5593R_TEST_DAC_MASK,
-      .adc_mask = AD5593R_TEST_ADC_MASK,
-  };
-  ad5593r_channel_sample_t adc_sample = {0};
-  lcd_ad5593r_ui_t ui = {0};
-  ad5593r_status_t ad5593r_status = AD5593R_STATUS_OK;
-  bool ad5593r_ready = false;
+  lcd_control_ui_t ui = {0};
+  control_snapshot_t snapshot = {0};
   bool touch_initialized = false;
   uint32_t elapsed_ms = 0U;
   uint32_t last_touch_init_attempt_ms = 0U;
   uint32_t last_debug_update_ms = 0U;
-  uint32_t wave_elapsed_ms = AD5593R_WAVE_PERIOD_MS;
-  uint32_t wave_index = 0U;
-  uint16_t dac_raw = lcd_ad5593r_sine_raw[0];
+  uint32_t last_ui_update_ms = 0U;
 
   (void)argument;
 
@@ -98,20 +81,8 @@ void lcd_task_entry(void *argument)
     }
   }
 
-  lcd_ad5593r_create_ui(&ui);
+  lcd_control_create_ui(&ui);
   lcd_display_backlight_on();
-
-  ad5593r_status = ad5593r_init(&ad5593r, &ad5593r_config);
-  ad5593r_ready = (ad5593r_status == AD5593R_STATUS_OK);
-  if (ad5593r_ready)
-  {
-    lcd_ad5593r_set_status(&ui, "AD5593R ready", ad5593r_status);
-    lcd_ad5593r_update_wave_ui(&ui, &ad5593r, dac_raw, NULL);
-  }
-  else
-  {
-    lcd_ad5593r_set_status(&ui, "AD5593R init failed", ad5593r_status);
-  }
 
   for (;;)
   {
@@ -131,40 +102,27 @@ void lcd_task_entry(void *argument)
       last_debug_update_ms = elapsed_ms;
     }
 
-    if (ad5593r_ready && wave_elapsed_ms >= AD5593R_WAVE_PERIOD_MS)
+    if ((elapsed_ms - last_ui_update_ms) >= UI_UPDATE_PERIOD_MS)
     {
-      dac_raw = lcd_ad5593r_sine_raw[wave_index];
-      ad5593r_status = ad5593r_write_dac(&ad5593r, AD5593R_TEST_DAC_CHANNEL, dac_raw);
-      if (ad5593r_status == AD5593R_STATUS_OK)
+      if (control_get_snapshot(&snapshot))
       {
-        ad5593r_status = lcd_ad5593r_read_adc_channel(&ad5593r, AD5593R_TEST_ADC_CHANNEL, &adc_sample);
+        lcd_control_update_ui(&ui, &snapshot);
       }
-
-      if (ad5593r_status == AD5593R_STATUS_OK)
-      {
-        wave_index = (wave_index + 1U) % AD5593R_WAVE_POINTS;
-        lcd_ad5593r_set_status(&ui, "AD5593R ready: connect IO0 to IO4", ad5593r_status);
-        lcd_ad5593r_update_wave_ui(&ui, &ad5593r, dac_raw, &adc_sample);
-      }
-      else
-      {
-        lcd_ad5593r_set_status(&ui, "AD5593R wave/read failed", ad5593r_status);
-      }
-
-      wave_elapsed_ms = 0U;
+      last_ui_update_ms = elapsed_ms;
     }
 
     osDelay(LCD_TASK_PERIOD_MS);
     elapsed_ms += LCD_TASK_PERIOD_MS;
-    wave_elapsed_ms += LCD_TASK_PERIOD_MS;
   }
 }
 
-static void lcd_ad5593r_create_ui(lcd_ad5593r_ui_t *ui)
+static void lcd_control_create_ui(lcd_control_ui_t *ui)
 {
   lv_obj_t *screen = lv_screen_active();
   lv_obj_t *title = NULL;
   lv_obj_t *legend = NULL;
+  lv_obj_t *slider_label = NULL;
+  lv_obj_t *enable_label = NULL;
 
   if (ui == NULL)
   {
@@ -172,19 +130,14 @@ static void lcd_ad5593r_create_ui(lcd_ad5593r_ui_t *ui)
   }
 
   title = lv_label_create(screen);
-  lv_label_set_text(title, "AD5593R IO0 to IO4 Loopback");
+  lv_label_set_text(title, "Power Voltage Closed Loop");
   lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
   lv_obj_align(title, LV_ALIGN_TOP_LEFT, 16, 4);
 
   ui->status_label = lv_label_create(screen);
   lv_obj_set_style_text_font(ui->status_label, &lv_font_montserrat_16, 0);
-  lv_label_set_text(ui->status_label, "AD5593R starting...");
+  lv_label_set_text(ui->status_label, "Control task starting");
   lv_obj_align(ui->status_label, LV_ALIGN_TOP_LEFT, 16, 34);
-
-  ui->value_label = lv_label_create(screen);
-  lv_obj_set_style_text_font(ui->value_label, &lv_font_montserrat_20, 0);
-  lv_label_set_text(ui->value_label, "IO0 DAC -- | IO4 ADC --");
-  lv_obj_align(ui->value_label, LV_ALIGN_TOP_LEFT, 16, 56);
 
   ui->touch_debug_label = lv_label_create(screen);
   lv_label_set_long_mode(ui->touch_debug_label, LV_LABEL_LONG_MODE_WRAP);
@@ -194,187 +147,208 @@ static void lcd_ad5593r_create_ui(lcd_ad5593r_ui_t *ui)
   lv_obj_align(ui->touch_debug_label, LV_ALIGN_TOP_RIGHT, -12, 8);
   lv_label_set_text(ui->touch_debug_label, "TP: waiting");
 
+  ui->reference_label = lv_label_create(screen);
+  lv_obj_set_style_text_font(ui->reference_label, &lv_font_montserrat_24, 0);
+  lv_label_set_text(ui->reference_label, "Set 0.00 kV");
+  lv_obj_align(ui->reference_label, LV_ALIGN_TOP_LEFT, 16, 70);
+
+  ui->feedback_label = lv_label_create(screen);
+  lv_obj_set_style_text_font(ui->feedback_label, &lv_font_montserrat_24, 0);
+  lv_label_set_text(ui->feedback_label, "Feedback 0.00 kV");
+  lv_obj_align(ui->feedback_label, LV_ALIGN_TOP_LEFT, 260, 70);
+
+  ui->dac_label = lv_label_create(screen);
+  lv_obj_set_style_text_font(ui->dac_label, &lv_font_montserrat_20, 0);
+  lv_label_set_text(ui->dac_label, "DAC 0.00 V");
+  lv_obj_align(ui->dac_label, LV_ALIGN_TOP_LEFT, 540, 74);
+
+  slider_label = lv_label_create(screen);
+  lv_obj_set_style_text_font(slider_label, &lv_font_montserrat_16, 0);
+  lv_label_set_text(slider_label, "Reference");
+  lv_obj_align(slider_label, LV_ALIGN_TOP_LEFT, 16, 116);
+
+  ui->reference_slider = lv_slider_create(screen);
+  lv_obj_set_size(ui->reference_slider, 430, 24);
+  lv_obj_align(ui->reference_slider, LV_ALIGN_TOP_LEFT, 120, 116);
+  lv_slider_set_range(ui->reference_slider, CONTROL_REFERENCE_MIN_CENTIKV, CONTROL_REFERENCE_MAX_CENTIKV);
+  lv_slider_set_value(ui->reference_slider, CONTROL_REFERENCE_MIN_CENTIKV, LV_ANIM_OFF);
+  lv_obj_add_event_cb(ui->reference_slider, lcd_control_reference_slider_event, LV_EVENT_VALUE_CHANGED, NULL);
+
+  (void)lcd_control_create_step_button(screen, "-0.10", 572, 104, -CONTROL_REFERENCE_STEP_CENTIKV);
+  (void)lcd_control_create_step_button(screen, "+0.10", 668, 104, CONTROL_REFERENCE_STEP_CENTIKV);
+
+  enable_label = lv_label_create(screen);
+  lv_obj_set_style_text_font(enable_label, &lv_font_montserrat_16, 0);
+  lv_label_set_text(enable_label, "Loop");
+  lv_obj_align(enable_label, LV_ALIGN_TOP_LEFT, 16, 156);
+
+  ui->enable_switch = lv_switch_create(screen);
+  lv_obj_align(ui->enable_switch, LV_ALIGN_TOP_LEFT, 120, 148);
+  lv_obj_add_state(ui->enable_switch, LV_STATE_CHECKED);
+  lv_obj_add_event_cb(ui->enable_switch, lcd_control_enable_event, LV_EVENT_VALUE_CHANGED, NULL);
+
+  ui->fault_label = lv_label_create(screen);
+  lv_obj_set_style_text_font(ui->fault_label, &lv_font_montserrat_16, 0);
+  lv_label_set_text(ui->fault_label, "Fault none");
+  lv_obj_align(ui->fault_label, LV_ALIGN_TOP_LEFT, 220, 154);
+
   ui->chart = lv_chart_create(screen);
-  lv_obj_set_size(ui->chart, 760, 225);
-  lv_obj_align(ui->chart, LV_ALIGN_TOP_MID, 0, 84);
+  lv_obj_set_size(ui->chart, 760, 250);
+  lv_obj_align(ui->chart, LV_ALIGN_TOP_MID, 0, 196);
   lv_chart_set_type(ui->chart, LV_CHART_TYPE_LINE);
-  lv_chart_set_point_count(ui->chart, AD5593R_CHART_POINTS);
+  lv_chart_set_point_count(ui->chart, CONTROL_CHART_POINTS);
   lv_chart_set_update_mode(ui->chart, LV_CHART_UPDATE_MODE_SHIFT);
-  lv_chart_set_axis_range(ui->chart, LV_CHART_AXIS_PRIMARY_Y, 0, AD5593R_DEFAULT_VREF_MV);
+  lv_chart_set_axis_range(ui->chart, LV_CHART_AXIS_PRIMARY_Y, CONTROL_REFERENCE_MIN_CENTIKV, CONTROL_REFERENCE_MAX_CENTIKV);
   lv_chart_set_div_line_count(ui->chart, 6U, 8U);
   lv_obj_set_style_radius(ui->chart, 4, 0);
   lv_obj_set_style_border_width(ui->chart, 1, 0);
   lv_obj_set_style_pad_all(ui->chart, 8, 0);
 
-  ui->dac_series = lv_chart_add_series(ui->chart, lv_color_hex(0xE67E22), LV_CHART_AXIS_PRIMARY_Y);
-  ui->adc_series = lv_chart_add_series(ui->chart, lv_color_hex(0x1F77B4), LV_CHART_AXIS_PRIMARY_Y);
-  if (ui->dac_series != NULL)
+  ui->reference_series = lv_chart_add_series(ui->chart, lv_color_hex(0xE67E22), LV_CHART_AXIS_PRIMARY_Y);
+  ui->feedback_series = lv_chart_add_series(ui->chart, lv_color_hex(0x1F77B4), LV_CHART_AXIS_PRIMARY_Y);
+  if (ui->reference_series != NULL)
   {
-    lv_chart_set_all_values(ui->chart, ui->dac_series, LV_CHART_POINT_NONE);
+    lv_chart_set_all_values(ui->chart, ui->reference_series, LV_CHART_POINT_NONE);
   }
-  if (ui->adc_series != NULL)
+  if (ui->feedback_series != NULL)
   {
-    lv_chart_set_all_values(ui->chart, ui->adc_series, LV_CHART_POINT_NONE);
+    lv_chart_set_all_values(ui->chart, ui->feedback_series, LV_CHART_POINT_NONE);
   }
 
   legend = lv_label_create(screen);
   lv_obj_set_style_text_font(legend, &lv_font_montserrat_16, 0);
-  lv_label_set_text(legend, "Orange: IO0 DAC output    Blue: IO4 ADC input");
-  lv_obj_align(legend, LV_ALIGN_TOP_MID, 0, 314);
-
-  ui->table = lv_table_create(screen);
-  lv_table_set_column_count(ui->table, 4U);
-  lv_table_set_row_count(ui->table, 3U);
-  lv_table_set_column_width(ui->table, 0U, 100);
-  lv_table_set_column_width(ui->table, 1U, 150);
-  lv_table_set_column_width(ui->table, 2U, 210);
-  lv_table_set_column_width(ui->table, 3U, 300);
-  lv_obj_set_size(ui->table, 760, 136);
-  lv_obj_align(ui->table, LV_ALIGN_TOP_MID, 0, 338);
-  lv_obj_set_style_text_font(ui->table, &lv_font_montserrat_20, LV_PART_ITEMS);
-  lv_obj_set_style_text_align(ui->table, LV_TEXT_ALIGN_CENTER, LV_PART_ITEMS);
-  lv_obj_set_style_pad_top(ui->table, 10, LV_PART_ITEMS);
-  lv_obj_set_style_pad_bottom(ui->table, 10, LV_PART_ITEMS);
-  lv_obj_set_style_pad_left(ui->table, 8, LV_PART_ITEMS);
-  lv_obj_set_style_pad_right(ui->table, 8, LV_PART_ITEMS);
-  lv_obj_set_style_radius(ui->table, 4, 0);
-  lv_obj_set_style_border_width(ui->table, 1, 0);
-
-  lv_table_set_cell_value(ui->table, 0U, 0U, "CH");
-  lv_table_set_cell_value(ui->table, 0U, 1U, "Mode");
-  lv_table_set_cell_value(ui->table, 0U, 2U, "Raw");
-  lv_table_set_cell_value(ui->table, 0U, 3U, "Voltage");
-
-  lv_table_set_cell_value(ui->table, 1U, 0U, "IO0");
-  lv_table_set_cell_value(ui->table, 1U, 1U, "DAC OUT");
-  lv_table_set_cell_value(ui->table, 1U, 2U, "--");
-  lv_table_set_cell_value(ui->table, 1U, 3U, "--");
-
-  lv_table_set_cell_value(ui->table, 2U, 0U, "IO4");
-  lv_table_set_cell_value(ui->table, 2U, 1U, "ADC IN");
-  lv_table_set_cell_value(ui->table, 2U, 2U, "--");
-  lv_table_set_cell_value(ui->table, 2U, 3U, "--");
+  lv_label_set_text(legend, "Orange: reference kV    Blue: feedback kV");
+  lv_obj_align(legend, LV_ALIGN_TOP_MID, 0, 452);
 }
 
-static void lcd_ad5593r_set_status(lcd_ad5593r_ui_t *ui, const char *prefix, ad5593r_status_t status)
+static void lcd_control_update_ui(lcd_control_ui_t *ui, const control_snapshot_t *snapshot)
 {
-  const char *current_text = NULL;
-  char next_text[96] = {0};
+  int32_t reference_centikv = 0;
+  int32_t feedback_centikv = 0;
 
-  if (ui == NULL || ui->status_label == NULL || prefix == NULL)
+  if (ui == NULL || snapshot == NULL)
   {
     return;
   }
 
-  current_text = lv_label_get_text(ui->status_label);
-  if (status == AD5593R_STATUS_OK)
+  reference_centikv = lcd_control_kv_to_centikv(snapshot->reference_kv);
+  feedback_centikv = lcd_control_kv_to_centikv(snapshot->feedback_kv);
+
+  if (ui->status_label != NULL)
   {
-    if (current_text == NULL || strcmp(current_text, prefix) != 0)
+    lv_label_set_text(ui->status_label, snapshot->loop_enabled ? "Control loop enabled" : "Control loop stopped");
+  }
+
+  if (ui->reference_label != NULL)
+  {
+    lv_label_set_text_fmt(ui->reference_label,
+                          "Set %ld.%02ld kV",
+                          (long)(reference_centikv / 100),
+                          (long)(reference_centikv % 100));
+  }
+
+  if (ui->feedback_label != NULL)
+  {
+    lv_label_set_text_fmt(ui->feedback_label,
+                          "Feedback %ld.%02ld kV",
+                          (long)(feedback_centikv / 100),
+                          (long)(feedback_centikv % 100));
+  }
+
+  if (ui->dac_label != NULL)
+  {
+    const int32_t dac_centivolts = (int32_t)((snapshot->dac_volts * 100.0f) + 0.5f);
+    lv_label_set_text_fmt(ui->dac_label, "DAC %ld.%02ld V", (long)(dac_centivolts / 100), (long)(dac_centivolts % 100));
+  }
+
+  if (ui->fault_label != NULL)
+  {
+    if (snapshot->fault_flags == CONTROL_FAULT_NONE)
     {
-      lv_label_set_text(ui->status_label, prefix);
+      lv_label_set_text(ui->fault_label, "Fault none");
+    }
+    else
+    {
+      lv_label_set_text_fmt(ui->fault_label, "Fault 0x%08lx", (unsigned long)snapshot->fault_flags);
     }
   }
-  else
+
+  if (ui->reference_slider != NULL && lv_slider_get_value(ui->reference_slider) != reference_centikv)
   {
-    lv_snprintf(next_text, sizeof(next_text), "%s: %s", prefix, lcd_ad5593r_status_text(status));
-    if (current_text == NULL || strcmp(current_text, next_text) != 0)
+    lv_slider_set_value(ui->reference_slider, reference_centikv, LV_ANIM_OFF);
+  }
+
+  if (ui->enable_switch != NULL)
+  {
+    if (snapshot->loop_enabled)
     {
-      lv_label_set_text(ui->status_label, next_text);
+      lv_obj_add_state(ui->enable_switch, LV_STATE_CHECKED);
     }
+    else
+    {
+      lv_obj_remove_state(ui->enable_switch, LV_STATE_CHECKED);
+    }
+  }
+
+  if (ui->chart != NULL && ui->reference_series != NULL)
+  {
+    lv_chart_set_next_value(ui->chart, ui->reference_series, reference_centikv);
+  }
+  if (ui->chart != NULL && ui->feedback_series != NULL)
+  {
+    lv_chart_set_next_value(ui->chart, ui->feedback_series, feedback_centikv);
   }
 }
 
-static void lcd_ad5593r_update_wave_ui(lcd_ad5593r_ui_t *ui,
-                                       ad5593r_handle_t *ad5593r,
-                                       uint16_t dac_raw,
-                                       const ad5593r_channel_sample_t *adc_sample)
+static void lcd_control_reference_slider_event(lv_event_t *event)
 {
-  uint16_t dac_millivolts = 0U;
+  lv_obj_t *slider = (lv_obj_t *)lv_event_get_target(event);
 
-  if (ui == NULL || ui->table == NULL || ad5593r == NULL)
+  if (slider == NULL)
   {
     return;
   }
 
-  dac_millivolts = ad5593r_raw_to_millivolts(ad5593r, dac_raw);
-
-  lv_table_set_cell_value_fmt(ui->table, 1U, 2U, "%u", (unsigned)dac_raw);
-  lv_table_set_cell_value_fmt(ui->table,
-                              1U,
-                              3U,
-                              "%u.%03u V",
-                              (unsigned)(dac_millivolts / 1000U),
-                              (unsigned)(dac_millivolts % 1000U));
-
-  if (ui->chart != NULL && ui->dac_series != NULL)
-  {
-    lv_chart_set_next_value(ui->chart, ui->dac_series, dac_millivolts);
-  }
-
-  if (adc_sample != NULL && adc_sample->valid)
-  {
-    lv_table_set_cell_value_fmt(ui->table, 2U, 2U, "%u", (unsigned)adc_sample->raw);
-    lv_table_set_cell_value_fmt(ui->table,
-                                2U,
-                                3U,
-                                "%u.%03u V",
-                                (unsigned)(adc_sample->millivolts / 1000U),
-                                (unsigned)(adc_sample->millivolts % 1000U));
-    lv_label_set_text_fmt(ui->value_label,
-                          "IO0 DAC %u.%03u V    IO4 ADC %u.%03u V",
-                          (unsigned)(dac_millivolts / 1000U),
-                          (unsigned)(dac_millivolts % 1000U),
-                          (unsigned)(adc_sample->millivolts / 1000U),
-                          (unsigned)(adc_sample->millivolts % 1000U));
-
-    if (ui->chart != NULL && ui->adc_series != NULL)
-    {
-      lv_chart_set_next_value(ui->chart, ui->adc_series, adc_sample->millivolts);
-    }
-  }
-  else
-  {
-    lv_table_set_cell_value(ui->table, 2U, 2U, "--");
-    lv_table_set_cell_value(ui->table, 2U, 3U, "--");
-    lv_label_set_text_fmt(ui->value_label,
-                          "IO0 DAC %u.%03u V    IO4 ADC --",
-                          (unsigned)(dac_millivolts / 1000U),
-                          (unsigned)(dac_millivolts % 1000U));
-
-    if (ui->chart != NULL && ui->adc_series != NULL)
-    {
-      lv_chart_set_next_value(ui->chart, ui->adc_series, LV_CHART_POINT_NONE);
-    }
-  }
+  control_set_reference_kv(lcd_control_centikv_to_kv(lv_slider_get_value(slider)));
 }
 
-static ad5593r_status_t lcd_ad5593r_read_adc_channel(ad5593r_handle_t *ad5593r,
-                                                     uint8_t channel,
-                                                     ad5593r_channel_sample_t *sample)
+static void lcd_control_reference_step_event(lv_event_t *event)
 {
-  ad5593r_status_t status = AD5593R_STATUS_OK;
+  const int32_t step = (int32_t)(intptr_t)lv_event_get_user_data(event);
+  const int32_t current = lcd_control_kv_to_centikv(control_get_reference_kv());
+  control_set_reference_kv(lcd_control_centikv_to_kv(lcd_control_clamp_centikv(current + step)));
+}
 
-  if (ad5593r == NULL || sample == NULL)
+static void lcd_control_enable_event(lv_event_t *event)
+{
+  lv_obj_t *switch_obj = (lv_obj_t *)lv_event_get_target(event);
+
+  if (switch_obj == NULL)
   {
-    return AD5593R_STATUS_ERROR_ARGUMENT;
+    return;
   }
 
-  for (uint8_t attempt = 0U; attempt < AD5593R_CHANNEL_COUNT; ++attempt)
-  {
-    status = ad5593r_read_adc(ad5593r, sample);
-    if (status != AD5593R_STATUS_OK)
-    {
-      return status;
-    }
+  control_set_loop_enabled(lv_obj_has_state(switch_obj, LV_STATE_CHECKED));
+}
 
-    if (sample->valid && sample->channel == channel)
-    {
-      return AD5593R_STATUS_OK;
-    }
-  }
+static lv_obj_t *lcd_control_create_step_button(lv_obj_t *parent,
+                                                const char *text,
+                                                int32_t x,
+                                                int32_t y,
+                                                int32_t step_centikv)
+{
+  lv_obj_t *button = lv_button_create(parent);
+  lv_obj_t *label = NULL;
 
-  sample->valid = false;
-  return AD5593R_STATUS_ERROR_BAD_ADC_FRAME;
+  lv_obj_set_size(button, 76, 44);
+  lv_obj_align(button, LV_ALIGN_TOP_LEFT, x, y);
+  lv_obj_add_event_cb(button, lcd_control_reference_step_event, LV_EVENT_CLICKED, (void *)(intptr_t)step_centikv);
+
+  label = lv_label_create(button);
+  lv_label_set_text(label, text);
+  lv_obj_center(label);
+
+  return button;
 }
 
 static void update_touch_debug_label(lv_obj_t *label)
@@ -406,23 +380,27 @@ static void update_touch_debug_label(lv_obj_t *label)
   lv_label_set_text(label, text);
 }
 
-static const char *lcd_ad5593r_status_text(ad5593r_status_t status)
+static int32_t lcd_control_kv_to_centikv(float kv)
 {
-  switch (status)
+  return lcd_control_clamp_centikv((int32_t)((kv * 100.0f) + 0.5f));
+}
+
+static float lcd_control_centikv_to_kv(int32_t centikv)
+{
+  return (float)lcd_control_clamp_centikv(centikv) / 100.0f;
+}
+
+static int32_t lcd_control_clamp_centikv(int32_t centikv)
+{
+  if (centikv < CONTROL_REFERENCE_MIN_CENTIKV)
   {
-    case AD5593R_STATUS_OK:
-      return "ok";
-    case AD5593R_STATUS_ERROR_ARGUMENT:
-      return "argument";
-    case AD5593R_STATUS_ERROR_NOT_FOUND:
-      return "scan failed";
-    case AD5593R_STATUS_ERROR_I2C:
-      return "i2c error";
-    case AD5593R_STATUS_ERROR_BAD_CHANNEL:
-      return "bad channel";
-    case AD5593R_STATUS_ERROR_BAD_ADC_FRAME:
-      return "bad adc frame";
-    default:
-      return "unknown";
+    return CONTROL_REFERENCE_MIN_CENTIKV;
   }
+
+  if (centikv > CONTROL_REFERENCE_MAX_CENTIKV)
+  {
+    return CONTROL_REFERENCE_MAX_CENTIKV;
+  }
+
+  return centikv;
 }
