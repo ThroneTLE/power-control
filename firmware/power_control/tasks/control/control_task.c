@@ -87,7 +87,8 @@ void control_task_entry(void *argument)
       {
         feedback_kv = feedback_filter_update(&feedback_filter, raw_feedback_kv);
         const float correction_volts = pid_controller_update(&pid, reference_kv, feedback_kv, CONTROL_TASK_PERIOD_S);
-        dac_volts = control_task_reference_to_feedforward_volts(reference_kv) + correction_volts;
+        const pid_controller_state_t pid_state = pid_controller_get_state(&pid);
+        dac_volts = control_task_reference_to_feedforward_volts(pid_state.active_setpoint) + correction_volts;
         dac_volts = control_task_clamp(dac_volts, CONTROL_DAC_MIN_VOLTS, CONTROL_DAC_MAX_VOLTS);
         dac_raw = control_task_volts_to_raw(dac_volts);
 
