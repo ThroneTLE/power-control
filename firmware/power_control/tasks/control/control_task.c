@@ -25,6 +25,8 @@
 #define CONTROL_PID_KI 0.2f
 #define CONTROL_PID_KD 0.0f
 #define CONTROL_PID_INTEGRAL_LIMIT (CONTROL_DAC_MAX_VOLTS / CONTROL_PID_KI)
+#define CONTROL_PID_CORRECTION_MIN_VOLTS (-CONTROL_DAC_MAX_VOLTS)
+#define CONTROL_PID_CORRECTION_MAX_VOLTS CONTROL_DAC_MAX_VOLTS
 #define CONTROL_SETPOINT_RATE_LIMIT 5.0f
 #define CONTROL_OUTPUT_RATE_LIMIT   5.0f
 #define CONTROL_FEEDBACK_FILTER_ALPHA 0.1f
@@ -139,8 +141,8 @@ static bool control_task_init_pid(pid_controller_t *pid)
       .kp = CONTROL_PID_KP,
       .ki = CONTROL_PID_KI,
       .kd = CONTROL_PID_KD,
-      .output_min = CONTROL_DAC_MIN_VOLTS,
-      .output_max = CONTROL_DAC_MAX_VOLTS,
+      .output_min = CONTROL_PID_CORRECTION_MIN_VOLTS,
+      .output_max = CONTROL_PID_CORRECTION_MAX_VOLTS,
       .integral_min = -CONTROL_PID_INTEGRAL_LIMIT,
       .integral_max = CONTROL_PID_INTEGRAL_LIMIT,
       .setpoint_rate_limit = CONTROL_SETPOINT_RATE_LIMIT,
@@ -153,7 +155,7 @@ static bool control_task_init_pid(pid_controller_t *pid)
     return false;
   }
 
-  pid_controller_reset(pid, CONTROL_DAC_MIN_VOLTS, 0.0f, 0.0f);
+  pid_controller_reset(pid, 0.0f, 0.0f, 0.0f);
   return true;
 }
 

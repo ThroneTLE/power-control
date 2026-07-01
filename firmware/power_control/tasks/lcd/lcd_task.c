@@ -48,6 +48,7 @@ static lv_obj_t *lcd_control_create_step_button(lv_obj_t *parent,
                                                 int32_t step_centikv);
 static void update_touch_debug_label(lv_obj_t *label);
 static int32_t lcd_control_kv_to_centikv(float kv);
+static int32_t lcd_control_kv_to_millikv(float kv);
 static float lcd_control_centikv_to_kv(int32_t centikv);
 static int32_t lcd_control_clamp_centikv(int32_t centikv);
 static int32_t lcd_control_volts_to_millivolts(float volts);
@@ -155,7 +156,7 @@ static void lcd_control_create_ui(lcd_control_ui_t *ui)
 
   ui->feedback_label = lv_label_create(screen);
   lv_obj_set_style_text_font(ui->feedback_label, &lv_font_montserrat_24, 0);
-  lv_label_set_text(ui->feedback_label, "Current 0.000 V");
+  lv_label_set_text(ui->feedback_label, "Current 0.000 kV");
   lv_obj_align(ui->feedback_label, LV_ALIGN_TOP_LEFT, 260, 70);
 
   ui->dac_label = lv_label_create(screen);
@@ -226,7 +227,7 @@ static void lcd_control_update_ui(lcd_control_ui_t *ui, const control_snapshot_t
 {
   int32_t reference_centikv = 0;
   int32_t feedback_centikv = 0;
-  int32_t current_millivolts = 0;
+  int32_t current_millikv = 0;
   int32_t dac_millivolts = 0;
 
   if (ui == NULL || snapshot == NULL)
@@ -236,7 +237,7 @@ static void lcd_control_update_ui(lcd_control_ui_t *ui, const control_snapshot_t
 
   reference_centikv = lcd_control_kv_to_centikv(snapshot->reference_kv);
   feedback_centikv = lcd_control_kv_to_centikv(snapshot->feedback_kv);
-  current_millivolts = lcd_control_volts_to_millivolts(snapshot->feedback_kv * 1000.0f);
+  current_millikv = lcd_control_kv_to_millikv(snapshot->feedback_kv);
   dac_millivolts = lcd_control_volts_to_millivolts(snapshot->dac_volts);
 
   if (ui->status_label != NULL)
@@ -255,9 +256,9 @@ static void lcd_control_update_ui(lcd_control_ui_t *ui, const control_snapshot_t
   if (ui->feedback_label != NULL)
   {
     lv_label_set_text_fmt(ui->feedback_label,
-                          "Current %ld.%03ld V",
-                          (long)(current_millivolts / 1000),
-                          (long)(current_millivolts % 1000));
+                          "Current %ld.%03ld kV",
+                          (long)(current_millikv / 1000),
+                          (long)(current_millikv % 1000));
   }
 
   if (ui->dac_label != NULL)
@@ -390,6 +391,18 @@ static void update_touch_debug_label(lv_obj_t *label)
 static int32_t lcd_control_kv_to_centikv(float kv)
 {
   return lcd_control_clamp_centikv((int32_t)((kv * 100.0f) + 0.5f));
+}
+
+static int32_t lcd_control_kv_to_millikv(float kv)
+{
+  const int32_t millikv = (int32_t)((kv * 1000.0f) + 0.5f);
+
+  if (millikv < 0)
+  {
+    return 0;
+  }
+
+  return millikv;
 }
 
 static float lcd_control_centikv_to_kv(int32_t centikv)
